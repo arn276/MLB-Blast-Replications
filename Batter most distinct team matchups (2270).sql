@@ -1,7 +1,18 @@
 with
+playerGameLists as (
+	select batterid as playerid, visitingteam, left(gameid,3) as hometeam,gameid
+	from mlb.playlogs.plays
+	where battereventflag != 'F' --ensure completed plate appearance
+
+	union 
+	
+	select pitcherid as playerid, visitingteam, left(gameid,3) as hometeam,gameid
+	from mlb.playlogs.plays
+),
+
 adjustTeamNameChanges as(
 	/* Pulling game fields and adjusting teams that rebranded in same location */
-	select batterid,
+	select playerid,
 		case
 		when visitingteam in ('LAA','CAL','ANA') then 'ANA'
 		when visitingteam in ('FLO','MIA') then 'MIA'
@@ -9,12 +20,17 @@ adjustTeamNameChanges as(
 		else visitingteam
 		end as visitingteam,
 		case
-		when left(gameid,3) in ('LAA','CAL','ANA') then 'ANA'
-		when left(gameid,3) in ('FLO','MIA') then 'MIA'
-		when left(gameid,3) in ('WS1','WS2') then 'WS2'
-		else left(gameid,3)
+		when hometeam in ('LAA','CAL','ANA') then 'ANA'
+		when hometeam in ('FLO','MIA') then 'MIA'
+		when hometeam in ('WS1','WS2') then 'WS2'
+		else hometeam
 		end as hometeam
-	from mlb.playlogs.plays
+		
+	from playerGameLists
+	where 1=1
+		-- and batterid = 'staim001' 
+	 -- confirm in regular season
+	 and TO_DATE(left(right(gameid,9),8),'YYYYMMDD') in (select distinct game_date from mlb.gamelogs.games)
 ),
 
 uniqueMatchups as (
@@ -22,11 +38,15 @@ uniqueMatchups as (
 		Finding unique matchups independent of game location
 		e.g. Miami at St.Louis is the same as St. Louis at Miami
 	*/
-	select distinct batterid, 
+	select distinct playerid, 
 					case
 					when visitingteam < hometeam then visitingteam || hometeam
 					else hometeam || visitingteam
 					end as teamMatchups
+					
+	-- finding unique matchups, location dependent
+	-- select distinct batterid, visitingteam||hometeam as teamMatchups
+	
 	from adjustTeamNameChanges 
 ),
 
@@ -40,10 +60,11 @@ playerDetails as (
 )
 
 /* Top 50 batters with the most unique team matchups */
-Select playerName,playerid, count(teamMatchups) as uniqueTeamPairings, careerStart, careerEnd
+Select playerName, playerDetails.playerid, 
+	count(teamMatchups) as uniqueTeamPairings, careerStart, careerEnd
 from uniqueMatchups
-left join playerDetails on uniqueMatchups.batterid = playerDetails.playerid
-group by playerName, playerid,careerStart, careerEnd
+left join playerDetails on uniqueMatchups.playerid = playerDetails.playerid
+group by playerName, playerDetails.playerid,careerStart, careerEnd
 order by count(teamMatchups) desc
 limit 50
 
