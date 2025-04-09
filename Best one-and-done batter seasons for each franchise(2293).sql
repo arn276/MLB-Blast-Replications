@@ -3,7 +3,13 @@ with oneNdone_bat as (
 		case
 		when r.team in ('LAA','CAL','ANA') then 'ANA'
 		when r.team in ('FLO','MIA') then 'MIA'
-		when r.team in ('WS1','WS2') then 'WS2'
+		when r.team in ('MON','WAS') then 'WAS'
+		when r.team in ('BRO','LAN') then 'LAN'
+		when r.team in ('NY1','SFN') then 'SFN'
+		when r.team in ('SLA','SE1','MIL') then 'MIL'
+		when r.team in ('BSN','MLN','ATL') then 'ATL'
+		when r.team in ('PHA','KC1','OAK') then 'OAK'
+		when r.team in ('WS1','WS2','MIN') then 'MIN'
 		else r.team
 		end as team, 
 		count(r.year), y.year as year
@@ -12,7 +18,8 @@ with oneNdone_bat as (
 	where 1=1 
 		-- and r.playerid = 'andes101' 
 		and playerpos != 'P'
-		-- and r.team = 'PHI'
+		and r.team not in ('BLF','BRF','SLF')
+		and firstname||lastname != 'DanVogelbach'
 	group by r.playerid, lastname, firstname, r.team, y.year
 	having count(r.year) = 1
 ),
