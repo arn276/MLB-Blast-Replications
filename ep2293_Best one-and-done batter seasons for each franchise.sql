@@ -32,9 +32,10 @@ oneNdone_bat as (
 															else r.team
 															end = y.team
 	where 1=1 
-		and playerpos != 'P'
-		and r.team not in ('BLF','BRF','SLF')
+		-- and playerpos != 'P'
+		and r.team not in ('BLF','BRF','SLF','PTF')
 		and firstname||lastname != 'DanVogelbach'
+		-- and r.playerid in ('glaut001')
 	group by r.playerid, lastname, firstname, y.team
 	having count(r.year) = 1
 ),
@@ -45,75 +46,64 @@ addYr as (
 	left join fullRosters on oneNdone_bat.playerid = fullRosters.playerid and oneNdone_bat.team = fullRosters.team
 ),
 
-playerGames as (
-	select batterid, runnerid1st,runnerid2nd,runnerid3rd, cast(right(left(gameid,7),4) as int) as yr, eventtype,eventcode,
-		abflag, hitvalue, batterdest, shflag, sfflag
+batterGames as (
+	select batterid, runnerid1st,runnerid2nd,runnerid3rd, cast(right(left(gameid,7),4) as int) as yr, 
+		case when abflag = 'T' then 1 else 0 end as ab,
+		case when eventtype in (20,21,22,23) then hitvalue else 0 end as tb,
+		case when hitvalue != 0 then 1 else 0 end as h,
+		case when eventtype = 14 then 1 else 0 end as bb,
+		case when eventtype = 15 then 1 else 0 end as ibb,
+		case when eventtype = 16 then 1 else 0 end as hbp,
+		case when eventcode like '%GDP%' then 1 else 0 end as gdp,
+		case when shflag = 'T' then 1 else 0 end as sh,
+		case when sfflag = 'T' then 1 else 0 end as sf,
+	
+		eventtype,eventcode,abflag, hitvalue, batterdest, shflag, sfflag
 	FROM playlogs.plays, addYr
 	where batterid||case when battingteam = 0 then visitingteam else left(gameid,3) end in (addYr.pKey) 
 ),
 
 batterTot as (
-	SELECT batterid,  yr, count(abflag) as ab,sum(hitvalue) as h,sum(batterdest) as tb
-		FROM playerGames
-		where abflag = 'T'
+	SELECT batterid,  yr, sum(ab) as ab,   --count(abflag) as ab,
+			sum(h) as h, sum(tb) as tb, sum(bb) as bb, sum(ibb) as ibb,
+			sum(hbp) as hbp, sum(gdp) as gdp, sum(sh) as sh, sum(sf) as sf
+		FROM batterGames
+		-- where abflag = 'T'
 		group by batterid, yr
 ),
 
-walksTot as (
-	select batterid, yr, count(eventtype) as bb
-	FROM playerGames
-	where eventtype = 14
-	group by batterid, yr
-),
-
-iWalksTot as (
-	select batterid, yr, count(eventtype) as ibb
-	FROM playerGames
-	where eventtype = 15
-	group by batterid, yr
-),
-
-hbpTot as (
-	select batterid, yr, count(eventtype) as hbp
-	FROM playerGames
-	where eventtype = 16
-	group by batterid, yr
-),
-
-gdpTot as (
-	select batterid,  yr, count(batterid) as gdp
-	from playerGames
-	where eventcode like '%GDP%'
-	group by batterid, yr
-),
-
-sacTot as (
-	select batterid,  yr, 
-	sum(case when shflag = 'T' then 1 else 0 end) as sh,
-	sum(case when sfflag = 'T' then 1 else 0 end) as sf
-	from playerGames
-	group by batterid, yr
+runnerGames as (
+	select runnerid1st,runnerid2nd,runnerid3rd, cast(right(left(gameid,7),4) as int) as yr, 
+		runnerid1st||case when battingteam = 0 then visitingteam else left(gameid,3) end as runnerid1stKey,
+		runnerid2nd||case when battingteam = 0 then visitingteam else left(gameid,3) end as runnerid2ndKey,
+		runnerid3rd||case when battingteam = 0 then visitingteam else left(gameid,3) end as runnerid3rdKey,
+			eventcode, eventType
+	FROM playlogs.plays
+	where eventcode like '%SB%' or eventcode like '%CS%'
 ),
 
 stolenBase as (
-	select runnerid1st as runnerid,  yr, count(runnerid1st) as sb
-	from playerGames
+	select runnerid1st as runnerid,  r.yr, count(runnerid1st) as sb
+	from runnerGames as r, addYr
 	where eventcode like '%SB2%'
-	group by runnerid1st, yr
+		and runnerid1stKey in (addYr.pKey)
+	group by runnerid1st, r.yr
 	
 	union all
 	
-	select runnerid2nd as runnerid, yr, count(runnerid2nd) as sb
-	from playerGames
+	select runnerid2nd as runnerid, r.yr, count(runnerid2nd) as sb
+	from runnerGames as r, addYr
 	where eventcode like '%SB3%'
-	group by runnerid2nd, yr
+		and runnerid2ndKey in (addYr.pKey)
+	group by runnerid2nd, r.yr
 	
 	union all
 	
-	select runnerid3rd as runnerid, yr, count(runnerid3rd) as sb
-	from playerGames
+	select runnerid3rd as runnerid, r.yr, count(runnerid3rd) as sb
+	from runnerGames as r, addYr
 	where eventcode like '%SBH%'
-	group by runnerid3rd, yr
+		and runnerid3rdKey in (addYr.pKey)
+	group by runnerid3rd, r.yr
 ),
 
 stolenBaseTot as (
@@ -123,24 +113,27 @@ stolenBaseTot as (
 ),
 
 caughtStealing as (
-	select runnerid1st as runnerid, yr, count(runnerid1st) as cs
-	from playerGames
-	where eventType = 6
-	group by runnerid1st, yr
+	select runnerid1st as runnerid, r.yr, count(runnerid1st) as cs
+	from runnerGames as r, addYr
+	where eventcode like '%CS2%'
+		and runnerid1stKey in (addYr.pKey)
+	group by runnerid1st, r.yr
 	
 	union all
 	
-	select runnerid2nd as runnerid, yr, count(runnerid2nd) as cs
-	from playerGames
-	where eventType = 6
-	group by runnerid2nd, yr
+	select runnerid2nd as runnerid, r.yr, count(runnerid2nd) as cs
+	from runnerGames as r, addYr
+	where eventcode like '%CS3%'
+		and runnerid2ndKey in (addYr.pKey)
+	group by runnerid2nd, r.yr
 	
 	union all
 	
-	select runnerid3rd as runnerid, yr, count(runnerid3rd) as cs
-	from playerGames
-	where  eventType = 6
-	group by runnerid3rd, yr
+	select runnerid3rd as runnerid, r.yr, count(runnerid3rd) as cs
+	from runnerGames as r, addYr
+	where eventcode like '%CSH%'
+		and runnerid3rdKey in (addYr.pKey)
+	group by runnerid3rd, r.yr
 ),
 
 caughtStealingTot as (
@@ -152,15 +145,10 @@ caughtStealingTot as (
 zeros as (
 	select batterTot.batterid, batterTot.yr, sh, sf,
 	coalesce(ab,0) as ab, coalesce(h,0) as h,coalesce(tb,0) as tb,
-	coalesce(bb,0) as bb,coalesce(ibb,0) as ibb,coalesce(hbp,0) as hbp,
+	coalesce(bb,0) as bb, coalesce(ibb,0) as ibb,coalesce(hbp,0) as hbp,
 	coalesce(gdp,0) as gdp,coalesce(sb,0) as sb,coalesce(cs,0) as cs
 	
 	from batterTot
-	left join walksTot on  batterTot.batterid = walksTot.batterid and batterTot.yr = walksTot.yr
-	left join iWalksTot on  batterTot.batterid = iWalksTot.batterid and batterTot.yr = iWalksTot.yr
-	left join hbpTot on  batterTot.batterid = hbpTot.batterid and batterTot.yr = hbpTot.yr
-	left join gdpTot on  batterTot.batterid = gdpTot.batterid and batterTot.yr = gdpTot.yr
-	left join sacTot on  batterTot.batterid = sacTot.batterid and batterTot.yr = sacTot.yr
 	left join stolenBaseTot on  batterTot.batterid = stolenBaseTot.runnerid and batterTot.yr = stolenBaseTot.yr
 	left join caughtStealingTot on  batterTot.batterid = caughtStealingTot.runnerid and batterTot.yr = caughtStealingTot.yr
 ),
@@ -179,21 +167,24 @@ calculate as (
 		((h+bb-cs+hbp-gdp)*(tb+(0.26*(bb-ibb+hbp))+(0.52*(sh+sf+sb))))/(ab+bb+hbp+sh+sf) as RCtechnical
 	from zeros
 	left join addYr on zeros.yr = addYr.yr and zeros.batterid = addYr.playerid
-	where addYr.team is not null
+	where addYr.team is not null and ab > 0
 ),
 
 rankResults as (
 	select batterid, lastname, firstname, team, yr,
-		-- RC_SBmethod,
-		-- rank() over (partition by team order by RC_SBmethod desc ) as RC_SB_Rank,
+		RC_SBmethod,
+		rank() over (partition by team order by RC_SBmethod desc ) as RC_SB_Rank,
 		RCtechnical,
 		rank() over (partition by team order by RCtechnical desc ) as RC_tech_Rank
 	from calculate
 )
 
-Select batterid, lastname, firstname, team, yr, RCtechnical, RC_tech_Rank
+Select batterid, lastname, firstname, team, yr, 
+	-- RC_SBmethod, RC_SB_Rank,
+	RCtechnical, RC_tech_Rank
 from rankResults
 where RC_tech_Rank = 1
+
 
 
 
