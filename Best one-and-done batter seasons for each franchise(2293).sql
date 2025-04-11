@@ -1,41 +1,59 @@
-with oneNdone_bat as (
+with fullRosters as (
+	select playerid,case
+		when team in ('LAA','CAL','ANA') then 'ANA'
+		when team in ('FLO','MIA') then 'MIA'
+		when team in ('MON','WAS') then 'WAS'
+		when team in ('BRO','LAN') then 'LAN'
+		when team in ('NY1','SFN') then 'SFN'
+		when team in ('SLA','SE1','MIL') then 'MIL'
+		when team in ('BSN','MLN','ATL') then 'ATL'
+		when team in ('PHA','KC1','OAK') then 'OAK'
+		when team in ('WS1','WS2','MIN') then 'MIN'
+		else team
+		end as team, year 
+	from rosters.rosters
+),
+
+oneNdone_bat as (
 	select r.playerid, lastname, firstname, 
-		case
-		when r.team in ('LAA','CAL','ANA') then 'ANA'
-		when r.team in ('FLO','MIA') then 'MIA'
-		when r.team in ('MON','WAS') then 'WAS'
-		when r.team in ('BRO','LAN') then 'LAN'
-		when r.team in ('NY1','SFN') then 'SFN'
-		when r.team in ('SLA','SE1','MIL') then 'MIL'
-		when r.team in ('BSN','MLN','ATL') then 'ATL'
-		when r.team in ('PHA','KC1','OAK') then 'OAK'
-		when r.team in ('WS1','WS2','MIN') then 'MIN'
-		else r.team
-		end as team, 
-		count(r.year), y.year as year
+		y.team, 
+		count(r.year)
 	FROM rosters.rosters as r
-	left join (select playerid,team, year from rosters.rosters) as y on r.playerid=y.playerid and r.team=y.team
+	left join fullRosters as y on r.playerid=y.playerid and case
+															when r.team in ('LAA','CAL','ANA') then 'ANA'
+															when r.team in ('FLO','MIA') then 'MIA'
+															when r.team in ('MON','WAS') then 'WAS'
+															when r.team in ('BRO','LAN') then 'LAN'
+															when r.team in ('NY1','SFN') then 'SFN'
+															when r.team in ('SLA','SE1','MIL') then 'MIL'
+															when r.team in ('BSN','MLN','ATL') then 'ATL'
+															when r.team in ('PHA','KC1','OAK') then 'OAK'
+															when r.team in ('WS1','WS2','MIN') then 'MIN'
+															else r.team
+															end = y.team
 	where 1=1 
-		-- and r.playerid = 'andes101' 
 		and playerpos != 'P'
 		and r.team not in ('BLF','BRF','SLF')
 		and firstname||lastname != 'DanVogelbach'
-	group by r.playerid, lastname, firstname, r.team, y.year
+	group by r.playerid, lastname, firstname, y.team
 	having count(r.year) = 1
+),
+
+addYr as (
+	select oneNdone_bat.*, fullRosters.year as yr, oneNdone_bat.playerid||oneNdone_bat.team as pKey
+	from oneNdone_bat
+	left join fullRosters on oneNdone_bat.playerid = fullRosters.playerid and oneNdone_bat.team = fullRosters.team
 ),
 
 playerGames as (
 	select batterid, runnerid1st,runnerid2nd,runnerid3rd, cast(right(left(gameid,7),4) as int) as yr, eventtype,eventcode,
 		abflag, hitvalue, batterdest, shflag, sfflag
-	FROM playlogs.plays, oneNdone_bat
-	where batterid in (oneNdone_bat.playerid)
+	FROM playlogs.plays, addYr
+	where batterid||case when battingteam = 0 then visitingteam else left(gameid,3) end in (addYr.pKey) 
 ),
 
 batterTot as (
 	SELECT batterid,  yr, count(abflag) as ab,sum(hitvalue) as h,sum(batterdest) as tb
-		-- ,batterhand, pitcherid, pitcherhand, runnerid1st, runnerid2nd, runnerid3rd, eventcode, leadoffflag, pinchhitflag, 
-		-- batterpos, lineupnum, eventtype, battereventflag, abflag, hitvalue, shflag, sfflag, outsonplay, rbis, wpflag, pbflag, 
-		-- errors, batterdest, runner1stdest, runner2nddest, runner3rddest
 		FROM playerGames
 		where abflag = 'T'
 		group by batterid, yr
@@ -133,16 +151,9 @@ caughtStealingTot as (
 
 zeros as (
 	select batterTot.batterid, batterTot.yr, sh, sf,
-	case when ab is null then 0 else ab end as ab, 
-	case when h is null then 0 else h  end as h, 
-	case when tb is null then 0 else tb end as tb, 
-	case when bb is null then 0 else bb end as bb, 
-	case when ibb is null then 0 else ibb end as ibb, 
-	case when hbp is null then 0 else hbp end as hbp,
-	case when gdp is null then 0 else gdp end as gdp,
-	
-	case when sb is null then 0 else sb end as sb,
-	case when cs is null then 0 else cs end as cs
+	coalesce(ab,0) as ab, coalesce(h,0) as h,coalesce(tb,0) as tb,
+	coalesce(bb,0) as bb,coalesce(ibb,0) as ibb,coalesce(hbp,0) as hbp,
+	coalesce(gdp,0) as gdp,coalesce(sb,0) as sb,coalesce(cs,0) as cs
 	
 	from batterTot
 	left join walksTot on  batterTot.batterid = walksTot.batterid and batterTot.yr = walksTot.yr
@@ -155,7 +166,7 @@ zeros as (
 ),
 
 calculate as (
-	select batterid, lastname, firstname, team, yr, --ab, h, tb, bb, ibb, hbp, sb, cs, gdp, sf, sh,
+	select batterid, lastname, firstname, team, zeros.yr, 
 		-- Runs Created (Stolen Base Method)
 		-- ((Hits + Walks – Caught Stealing) x (Total Bases + (0.55 x Stolen Bases))) ÷ (AB + Walks)
 		((h+(bb+ibb)-cs)*(tb+(0.55*sb)))/(ab+(bb+ibb)) as RC_SBmethod,
@@ -167,8 +178,8 @@ calculate as (
 		-- ÷ (At Bats + Walks + Hit by Pitch + Sacrifice Hits + Sacrifice Flies)
 		((h+bb-cs+hbp-gdp)*(tb+(0.26*(bb-ibb+hbp))+(0.52*(sh+sf+sb))))/(ab+bb+hbp+sh+sf) as RCtechnical
 	from zeros
-	left join oneNdone_bat on zeros.yr = oneNdone_bat.year and zeros.batterid = oneNdone_bat.playerid
-	where oneNdone_bat.team is not null
+	left join addYr on zeros.yr = addYr.yr and zeros.batterid = addYr.playerid
+	where addYr.team is not null
 ),
 
 rankResults as (
@@ -183,7 +194,6 @@ rankResults as (
 Select batterid, lastname, firstname, team, yr, RCtechnical, RC_tech_Rank
 from rankResults
 where RC_tech_Rank = 1
-
 
 
 
