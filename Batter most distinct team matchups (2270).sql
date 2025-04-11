@@ -27,10 +27,9 @@ adjustTeamNameChanges as(
 		end as hometeam
 		
 	from playerGameLists
-	where 1=1
-		-- and batterid = 'staim001' 
+	where  
 	 -- confirm in regular season
-	 and TO_DATE(left(right(gameid,9),8),'YYYYMMDD') in (select distinct game_date from mlb.gamelogs.games)
+	 TO_DATE(left(right(gameid,9),8),'YYYYMMDD') in (select distinct game_date from mlb.gamelogs.games)
 ),
 
 uniqueMatchups as (
@@ -45,7 +44,7 @@ uniqueMatchups as (
 					end as teamMatchups
 					
 	-- finding unique matchups, location dependent
-	-- select distinct batterid, visitingteam||hometeam as teamMatchups
+	-- select distinct playerid, visitingteam||hometeam as teamMatchups
 	
 	from adjustTeamNameChanges 
 ),
@@ -59,7 +58,7 @@ playerDetails as (
 	group by playerid, firstname||' '||lastname
 )
 
-/* Top 50 batters with the most unique team matchups */
+/* Top 50 players with the most unique team matchups */
 Select playerName, playerDetails.playerid, 
 	count(teamMatchups) as uniqueTeamPairings, careerStart, careerEnd
 from uniqueMatchups
