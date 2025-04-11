@@ -47,7 +47,7 @@ addYr as (
 ),
 
 batterGames as (
-	select batterid, runnerid1st,runnerid2nd,runnerid3rd, cast(right(left(gameid,7),4) as int) as yr, 
+	select batterid,  cast(right(left(gameid,7),4) as int) as yr, 
 		case when abflag = 'T' then 1 else 0 end as ab,
 		case when eventtype in (20,21,22,23) then hitvalue else 0 end as tb,
 		case when hitvalue != 0 then 1 else 0 end as h,
@@ -58,7 +58,7 @@ batterGames as (
 		case when shflag = 'T' then 1 else 0 end as sh,
 		case when sfflag = 'T' then 1 else 0 end as sf,
 	
-		eventtype,eventcode,abflag, hitvalue, batterdest, shflag, sfflag
+		eventtype,eventcode  
 	FROM playlogs.plays, addYr
 	where batterid||case when battingteam = 0 then visitingteam else left(gameid,3) end in (addYr.pKey) 
 ),
