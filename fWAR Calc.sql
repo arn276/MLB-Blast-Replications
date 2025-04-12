@@ -1,5 +1,5 @@
 With 
-playerStats as (
+batterStats as (
 	select batterid,  cast(right(left(gameid,7),4) as int) as yr, 
 		case when abflag = 'T' then 1 else 0 end as ab,
 		case when battereventflag = 'T' then 1 else 0 end as pa,
@@ -27,7 +27,7 @@ leagueTotals as (
 	select distinct yr,
 		cast(sum(gdp)over(partition by yr) as float) as lgGDP,
 		cast(sum(gdpo)over(partition by yr) as float) as lgGDPo
-	from playerStats
+	from batterStats
 ),
 
 lgRPO_calc as (
@@ -46,23 +46,140 @@ wRAA_calc as (
 			/
 		(sum(ab) + sum(bb) + sum(hbp) + sum(sh) + sum(sf))
 	)-woba)/wobascale)*sum(pa) as wRAA
-	from playerStats
-	left join constants.woba_fip as woba on playerStats.yr = woba.season
+	from batterStats
+	left join constants.woba_fip as woba on batterStats.yr = woba.season
 	group by batterid, wbb, whbp, w1b, w2b, w3b, whr, woba, wobascale
 ),
 
-bsr as (
-	select batterid,
+wGDPcalc as (
+	select batterid,batterStats.yr,
 		(((lgGDP/lgGDPo) * cast(sum(gdpo)as float)) - cast(sum(gdp)as float)) * lgRPO as wGDP
-	from playerStats
-	left join leagueTotals on playerStats.yr=leagueTotals.yr
-	left join lgRPO_calc on playerStats.yr=lgRPO_calc.year
-	group by batterid, lgGDP,lgGDPo,lgRPO
+	from batterStats
+	left join leagueTotals on batterStats.yr=leagueTotals.yr
+	left join lgRPO_calc on batterStats.yr=lgRPO_calc.year
+	group by batterid, batterStats.yr, lgGDP,lgGDPo,lgRPO
+),
+
+
+
+
+
+runnerGames as (
+	select runnerid1st,runnerid2nd,runnerid3rd, cast(right(left(gameid,7),4) as int) as yr, 
+			eventcode, eventType
+	FROM playlogs.plays
+	where eventcode like '%SB%' or eventcode like '%CS%'
+),
+
+stolenBase as (
+	select runnerid1st as runnerid,  yr, count(runnerid1st) as sb
+	from runnerGames
+	where eventcode like '%SB2%'
+	group by runnerid1st, yr
+	
+	union all
+	
+	select runnerid2nd as runnerid, yr, count(runnerid2nd) as sb
+	from runnerGames 
+	where eventcode like '%SB3%'
+	group by runnerid2nd, yr
+	
+	union all
+	
+	select runnerid3rd as runnerid, yr, count(runnerid3rd) as sb
+	from runnerGames 
+	where eventcode like '%SBH%'
+	group by runnerid3rd, yr
+),
+
+stolenBasePlayerTot as (
+	select runnerid, yr, cast(sum(sb) as float) as sb
+	from stolenBase
+	group by runnerid, yr
+),
+
+stolenBaseTeamTot as (
+	select  yr, cast(sum(sb) as float) as sb
+	from stolenBase
+	group by  yr
+),
+
+caughtStealing as (
+	select runnerid1st as runnerid, yr, count(runnerid1st) as cs
+	from runnerGames 
+	where eventcode like '%CS2%'
+	group by runnerid1st, yr
+	
+	union all
+	
+	select runnerid2nd as runnerid, yr, count(runnerid2nd) as cs
+	from runnerGames 
+	where eventcode like '%CS3%'
+	group by runnerid2nd, yr
+	
+	union all
+	
+	select runnerid3rd as runnerid, yr, count(runnerid3rd) as cs
+	from runnerGames 
+	where eventcode like '%CSH%'
+	group by runnerid3rd, yr
+),
+
+caughtStealingPlayerTot as (
+	select runnerid, yr, cast(sum(cs) as float) as cs
+	from caughtStealing
+	group by runnerid, yr
+),
+
+caughtStealingTeamTot as (
+	select  yr, cast(sum(cs) as float) as cs
+	from caughtStealing
+	group by  yr
+),
+
+lgqsbCalc as (
+	select distinct batterStats.yr,
+			(((sb * runsb) + (cs * runcs))
+				/
+			cast(sum(h_1b)+sum(bb)+sum(hbp) as float)) as lgwSB
+	from batterStats
+	left join stolenBaseTeamTot on batterStats.yr = stolenBaseTeamTot.yr
+	left join caughtStealingTeamTot on batterStats.yr = caughtStealingTeamTot.yr
+	left join constants.woba_fip as woba on batterStats.yr = woba.season
+	group by batterStats.yr, sb, cs , runsb,runcs
+),
+
+wsbCalc as (
+	select batterid, batterStats.yr,
+		((sb * runsb) + (cs * runcs)) - (lgwSB *cast( sum(h_1b) + sum(bb) + sum(hbp) as float)) as wSB
+	from batterStats
+	left join stolenBasePlayerTot on batterStats.batterid = stolenBasePlayerTot.runnerid
+										and batterStats.yr = stolenBasePlayerTot.yr
+	left join caughtStealingPlayerTot on batterStats.batterid = caughtStealingPlayerTot.runnerid
+										and batterStats.yr = caughtStealingPlayerTot.yr
+	left join lgqsbCalc on batterStats.yr = lgqsbCalc. yr
+	left join constants.woba_fip as woba on batterStats.yr = woba.season
+	group by batterid, batterStats.yr,sb, cs, runsb, runcs, lgwSB
+),
+
+bsrCalc as (
+	select wGDPcalc.batterid,wGDPcalc.yr, wGDP + wSB as bsr
+	from wGDPcalc
+	left join wsbCalc on wGDPcalc.batterid = wsbCalc.batterid and wGDPcalc.yr = wsbCalc.yr
 )
 
 
-select * from bsr
+select *
+from bsrCalc
 where batterid = 'sotoj001'
+
+-- Select yr, sum(cs)
+-- from caughtStealingTot
+-- where yr = 2021
+-- group by yr
+
+-- select * from runningtotals order by yr desc
+
 
 
 -- firstname, lastname,
