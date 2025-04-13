@@ -31,7 +31,7 @@ batterStats as (
 		end as team,
 		eventtype,eventcode,abflag, hitvalue, batterdest, shflag, sfflag,pinchhitflag,gameid
 	FROM playlogs.plays
-	-- where cast(right(left(gameid,7),4) as int) = 2021
+	where cast(right(left(gameid,7),4) as int) = 1992
 	
 	
 ),
@@ -178,8 +178,8 @@ lgwsbCalc as (
 ),
 
 wsbCalc as (
-	select batterid, batterStats.yr, batterStats.team,
-		((sb * runsb) + (cs * runcs)) - (lgwSB *cast( sum(h_1b) + sum(bb) + sum(hbp) as float)) as wSB
+	select batterid, batterStats.yr, batterStats.team,sb,runsb,cs,runcs,lgwSB,h_1b,bb,hbp,
+		((sb * runsb) + (cs * runcs)) - (lgwSB *cast( coalesce(sum(h_1b),0) + coalesce(sum(bb),0) + coalesce(sum(hbp),0) as float)) as wSB
 	from batterStats
 	left join stolenBasePlayerTot on batterStats.batterid = stolenBasePlayerTot.runnerid
 										and batterStats.yr = stolenBasePlayerTot.yr
@@ -189,11 +189,12 @@ wsbCalc as (
 										and batterStats.team = caughtStealingPlayerTot.team
 	left join lgwsbCalc on batterStats.yr = lgwsbCalc. yr
 	left join constants.woba_fip as woba on batterStats.yr = woba.season
-	group by batterid, batterStats.yr, batterStats.team,sb, cs, runsb, runcs, lgwSB
+	group by batterid, batterStats.yr, batterStats.team,sb, cs, runsb, runcs, lgwSB,h_1b,bb,hbp
 ),
 
 bsrCalc as (
-	select wGDPcalc.batterid,wGDPcalc.yr,wGDPcalc.team, wGDP + wSB as bsr
+	select wGDPcalc.batterid,wGDPcalc.yr,wGDPcalc.team,wGDP,wSB,
+		coalesce(wGDP,0) + coalesce(wSB,0) as bsr
 	from wGDPcalc
 	left join wsbCalc on wGDPcalc.batterid = wsbCalc.batterid and wGDPcalc.yr = wsbCalc.yr
 ),
@@ -222,7 +223,6 @@ rposCalc as (
 	left join defenseData as d on r.year = d.season and
 										r.firstname|| ' ' || r.lastname = d.nameascii 
 										and batterStats.team = d.franchise
-	where pinchhitflag = 'F'
 	group by batterid, year, batterStats.team, pos, inn, r.team
 ),
 
@@ -251,8 +251,8 @@ rlrCalc as (
 )
 
 
--- select distinct wRAA_calc.batterid, wRAA_calc.yr, wRAA_calc.team,wRAA,bsr,rpos,rlr,rpw,
--- 		(wRAA+bsr+rpos+rlr)/rpw as war
+-- select distinct wRAA_calc.batterid, wRAA_calc.yr, wRAA_calc.team,wRAA,bsr,sum(rpos) as rpos,rlr,rpw,
+-- 		(wRAA+bsr+sum(rpos)+rlr)/rpw as war
 -- from wRAA_calc
 -- left join bsrCalc on wRAA_calc.batterid = bsrCalc.batterid
 -- 					and wRAA_calc.yr = bsrCalc.yr
@@ -265,11 +265,14 @@ rlrCalc as (
 -- 					and wRAA_calc.team = rlrCalc.team
 -- left join lgRPW_calc on wRAA_calc.yr = lgRPW_calc.yr
 -- where wRAA_calc.yr > 1900
--- 	and  wRAA_calc.batterid = 'silvd001'
+-- 	and  wRAA_calc.batterid = 'winfd001'
+
+-- group by wRAA_calc.batterid, wRAA_calc.yr, wRAA_calc.team,wRAA,bsr,rlr,rpw
 
 
-select * from wsbCalc -- wGDPcalc --,wsbCalc
-where batterid = 'silvd001'
+select * 
+from wsbCalc -- wGDPcalc --,wsbCalc
+where batterid = 'winfd001'
 
 
 

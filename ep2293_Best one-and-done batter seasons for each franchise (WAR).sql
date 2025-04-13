@@ -78,15 +78,22 @@ batterStats as (
 		end as team,
 		eventtype,eventcode,abflag, hitvalue, batterdest, shflag, sfflag,pinchhitflag,gameid
 	FROM playlogs.plays, addYr
-	where batterid||case when battingteam = 0 then visitingteam else left(gameid,3) end in (addYr.pKey) 
-		and cast(right(left(gameid,7),4) as int) > 1900
+	where cast(right(left(gameid,7),4) as int) > 1900
+		and batterid||case when battingteam = 0 then visitingteam else left(gameid,3) end in (addYr.pKey) 
+		-- and cast(right(left(gameid,7),4) as int) = 1992
 ),
+
 
 leagueTotals as (
 	select distinct yr,
 		cast(sum(gdp)over(partition by yr) as float) as lgGDP,
 		cast(sum(gdpo)over(partition by yr) as float) as lgGDPo
-	from batterStats
+	from (select cast(right(left(gameid,7),4) as int) as yr,
+				case when eventcode like '%GDP%' then 1 else 0 end as gdp,
+				case when outs < 2 and runnerid1st != '' and abflag = 'T' then 1 else 0 end as gdpo
+			from playlogs.plays
+			where cast(right(left(gameid,7),4) as int) > 1900
+			)
 ),
 
 lgRPO_calc as (
@@ -109,7 +116,7 @@ wRAA_calc as (
 	from batterStats
 	left join constants.woba_fip as woba on batterStats.yr = woba.season
 	group by batterid, yr, team, wbb, whbp, w1b, w2b, w3b, whr, woba, wobascale
-	having (sum(ab) + sum(bb) + sum(hbp) + sum(sh) + sum(sf)) >0
+	having (sum(ab) + sum(bb) + sum(hbp) + sum(sh) + sum(sf))>0
 ),
 
 wGDPcalc as (
@@ -212,20 +219,24 @@ caughtStealingTeamTot as (
 ),
 
 lgwsbCalc as (
-	select distinct batterStats.yr, 
+	select distinct cast(right(left(gameid,7),4) as int) as yr, 
 			(((sb * runsb) + (cs * runcs))
 				/
-			cast(sum(h_1b)+sum(bb)+sum(hbp) as float)) as lgwSB
-	from batterStats
-	left join stolenBaseTeamTot on batterStats.yr = stolenBaseTeamTot.yr
-	left join caughtStealingTeamTot on batterStats.yr = caughtStealingTeamTot.yr
-	left join constants.woba_fip as woba on batterStats.yr = woba.season
-	group by batterStats.yr,  sb, cs , runsb,runcs
+			cast(
+			sum(case when eventtype = 20 then 1 else 0 end)+
+			sum(case when eventtype = 14 then 1 else 0 end)+
+			sum(case when eventtype = 16 then 1 else 0 end) as float)) as lgwSB
+	FROM playlogs.plays as p
+	left join stolenBaseTeamTot on cast(right(left(gameid,7),4) as int) = stolenBaseTeamTot.yr
+	left join caughtStealingTeamTot on cast(right(left(gameid,7),4) as int) = caughtStealingTeamTot.yr
+	left join constants.woba_fip as woba on cast(right(left(gameid,7),4) as int) = woba.season
+	where cast(right(left(gameid,7),4) as int) > 1900
+	group by cast(right(left(gameid,7),4) as int),  sb, cs , runsb,runcs
 ),
 
 wsbCalc as (
-	select batterid, batterStats.yr, batterStats.team,
-		((sb * runsb) + (cs * runcs)) - (lgwSB *cast( sum(h_1b) + sum(bb) + sum(hbp) as float)) as wSB
+	select batterid, batterStats.yr, batterStats.team,sb,runsb,cs,runcs,lgwSB,--h_1b,bb,hbp,
+		((sb * runsb) + (cs * runcs)) - (lgwSB *cast( coalesce(sum(h_1b),0) + coalesce(sum(bb),0) + coalesce(sum(hbp),0) as float)) as wSB
 	from batterStats
 	left join stolenBasePlayerTot on batterStats.batterid = stolenBasePlayerTot.runnerid
 										and batterStats.yr = stolenBasePlayerTot.yr
@@ -235,31 +246,33 @@ wsbCalc as (
 										and batterStats.team = caughtStealingPlayerTot.team
 	left join lgwsbCalc on batterStats.yr = lgwsbCalc. yr
 	left join constants.woba_fip as woba on batterStats.yr = woba.season
-	group by batterid, batterStats.yr, batterStats.team,sb, cs, runsb, runcs, lgwSB
+	group by batterid, batterStats.yr, batterStats.team,sb, cs, runsb, runcs, lgwSB --,h_1b,bb,hbp
 ),
 
 bsrCalc as (
-	select wGDPcalc.batterid,wGDPcalc.yr,wGDPcalc.team, wGDP + wSB as bsr
+	select wGDPcalc.batterid,wGDPcalc.yr,wGDPcalc.team,wGDP,wSB,
+		coalesce(wGDP,0) + coalesce(wSB,0) as bsr
 	from wGDPcalc
 	left join wsbCalc on wGDPcalc.batterid = wsbCalc.batterid and wGDPcalc.yr = wsbCalc.yr
 ),
 
 defenseData as (
-	select season, nameascii, pos, inn, franchise
+	select season, nameascii, pos, inn, g,franchise
 	from playlogs.defense as d
 	left join constants.teams_franchise as f on d.team = f.team
 ),
 
 rposCalc as (
 	select distinct batterid, year, batterStats.team, pos, inn,
-	(case when pos = 'C' then inn*9 else 0 end +
-	case when pos = '1b' then inn*-9.5 else 0 end +
-	case when pos = '2B' then inn*3 else 0 end +
-	case when pos = '3B' then inn*2 else 0 end +
-	case when pos = 'SS' then inn*7 else 0 end +
-	case when pos = 'LF' then inn*-7 else 0 end +
-	case when pos = 'CF' then inn*2.5 else 0 end +
-	case when pos = 'RF' or pos = 'Rf' then inn*-7 else 0 end +
+	/* Before 1955 assume all def games are played for 9 innings */
+	(case when pos = 'C' then coalesce(inn,g*9)*9 else 0 end +
+	case when pos = '1b' then coalesce(inn,g*9)*-9.5 else 0 end +
+	case when pos = '2B' then coalesce(inn,g*9)*3 else 0 end +
+	case when pos = '3B' then coalesce(inn,g*9)*2 else 0 end +
+	case when pos = 'SS' then coalesce(inn,g*9)*7 else 0 end +
+	case when pos = 'LF' then coalesce(inn,g*9)*-7 else 0 end +
+	case when pos = 'CF' then coalesce(inn,g*9)*2.5 else 0 end +
+	case when pos = 'RF' or pos = 'Rf' then coalesce(inn,g*9)*-7 else 0 end +
 	sum(padh) * -15)/1350 as rpos
 	
 	from batterStats
@@ -268,8 +281,7 @@ rposCalc as (
 	left join defenseData as d on r.year = d.season and
 										r.firstname|| ' ' || r.lastname = d.nameascii 
 										and batterStats.team = d.franchise
-	where pinchhitflag = 'F'
-	group by batterid, year, batterStats.team, pos, inn, r.team
+	group by batterid, year, batterStats.team, pos, inn, g, r.team
 ),
 
 lgRPW_calc as (
@@ -286,19 +298,22 @@ rlrCalc as (
 		((0.235*lgG) * rpw * sum(pa))/lgPa as rlr
 	from batterStats
 	left join lgRPW_calc on batterStats.yr = lgRPW_calc.yr
-	left join (select yr, count(distinct gameid) as lgG
-				from batterStats
-				group by yr) as leagueGames on batterStats.yr = leagueGames.yr
-	left join (select yr, sum(pa) as lgPa
-				from batterStats
-				group by yr) as leaguePA on batterStats.yr = leaguePA.yr
+	left join (select cast(right(left(gameid,7),4) as int) as yr, count(distinct gameid) as lgG
+				from playlogs.plays as p
+				where cast(right(left(gameid,7),4) as int) > 1900
+				group by cast(right(left(gameid,7),4) as int)) as leagueGames on batterStats.yr = leagueGames.yr
+	left join (select cast(right(left(gameid,7),4) as int) as yr, sum(case when battereventflag = 'T' then 1 else 0 end) as lgPa
+				from playlogs.plays as p
+				where cast(right(left(gameid,7),4) as int) > 1900
+				group by cast(right(left(gameid,7),4) as int)) as leaguePA on batterStats.yr = leaguePA.yr
 	where batterStats.yr>1900 --rpw is not null
 	group by batterid, batterStats.yr, team, lgPa, rpw, lgG
 ), 
 
 war as (
 	select wRAA_calc.batterid, lastname, firstname, wRAA_calc.yr, wRAA_calc.team,
-			(wRAA+bsr+rpos+rlr)/rpw as war
+		wRAA, bsr, coalesce(sum(rpos),0), rlr, rpw,
+			(wRAA+bsr+coalesce(sum(rpos),0)+rlr)/rpw as war
 	from wRAA_calc
 	left join addYr on wRAA_calc.yr = addYr.yr and wRAA_calc.batterid = addYr.playerid
 	left join bsrCalc on wRAA_calc.batterid = bsrCalc.batterid
@@ -312,6 +327,7 @@ war as (
 						and wRAA_calc.team = rlrCalc.team
 	left join lgRPW_calc on wRAA_calc.yr = lgRPW_calc.yr
 	where wRAA_calc.yr > 1900
+	group by wRAA_calc.batterid, lastname, firstname, wRAA_calc.yr, wRAA_calc.team,wRAA, bsr, rlr, rpw
 ),
 
 rankResults as (
@@ -325,11 +341,12 @@ Select batterid, lastname, firstname, team, yr,
 	war, WAR_Rank
 from rankResults
 where WAR_Rank = 1
+-- where team = 'CLE' order by WAR_Rank
 
--- select * from wRAA_calc 
--- -- where rpw =0
+-- select * from war 
+-- where batterid = 'winfd001'
 -- order by yr
--- -- limit 100
+-- limit 100
 
 
 
