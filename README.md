@@ -6,5 +6,5 @@ Standing up my Postgres Server with retro sheets data (Rosters, Playlogs, gamelo
 - ep. 2270 Players with most distinct team matchups
     - Restricts to top 50, with versions for matchups independent (e.g. Miami at St.Louis is the same as St. Louis at Miami) and dependent of location.
 - ep. 2293 Best one-and-done seasons for each franchise
-    - Batter - Calculated by runs created.
+    - Batter - Calculated by runs created and by WAR (to address defense, running, and batting)
     - Pitcher - 
