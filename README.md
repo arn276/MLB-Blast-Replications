@@ -8,3 +8,8 @@ Standing up my Postgres Server with retro sheets data (Rosters, Playlogs, gamelo
 - ep. 2293 Best one-and-done seasons for each franchise
     - Batter - Calculated by runs created and by WAR (to address defense, running, and batting)
     - Pitcher - 
+
+
+
+- Other
+  - fWAR Calc.sql standard WAR calculation (fWAR - set defensive Positional Adjustments (doesn't vary year-to-year))
