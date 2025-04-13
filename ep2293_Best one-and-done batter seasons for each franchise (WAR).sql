@@ -1,4 +1,51 @@
-With 
+with fullRosters as (
+	select playerid,case
+		when team in ('LAA','CAL','ANA') then 'ANA'
+		when team in ('FLO','MIA') then 'MIA'
+		when team in ('MON','WAS') then 'WAS'
+		when team in ('BRO','LAN') then 'LAN'
+		when team in ('NY1','SFN') then 'SFN'
+		when team in ('SLA','SE1','MIL') then 'MIL'
+		when team in ('BSN','MLN','ATL') then 'ATL'
+		when team in ('PHA','KC1','OAK') then 'OAK'
+		when team in ('WS1','WS2','MIN') then 'MIN'
+		else team
+		end as team, year 
+	from rosters.rosters
+),
+
+oneNdone_bat as (
+	select r.playerid, lastname, firstname, 
+		y.team, 
+		count(r.year)
+	FROM rosters.rosters as r
+	left join fullRosters as y on r.playerid=y.playerid and case
+															when r.team in ('LAA','CAL','ANA') then 'ANA'
+															when r.team in ('FLO','MIA') then 'MIA'
+															when r.team in ('MON','WAS') then 'WAS'
+															when r.team in ('BRO','LAN') then 'LAN'
+															when r.team in ('NY1','SFN') then 'SFN'
+															when r.team in ('SLA','SE1','MIL') then 'MIL'
+															when r.team in ('BSN','MLN','ATL') then 'ATL'
+															when r.team in ('PHA','KC1','OAK') then 'OAK'
+															when r.team in ('WS1','WS2','MIN') then 'MIN'
+															else r.team
+															end = y.team
+	where 1=1 
+		-- and playerpos != 'P'
+		and r.team not in ('BLF','BRF','SLF','PTF')
+		and firstname||lastname != 'DanVogelbach'
+		-- and r.playerid in ('glaut001')
+	group by r.playerid, lastname, firstname, y.team
+	having count(r.year) = 1
+),
+
+addYr as (
+	select oneNdone_bat.*, fullRosters.year as yr, oneNdone_bat.playerid||oneNdone_bat.team as pKey
+	from oneNdone_bat
+	left join fullRosters on oneNdone_bat.playerid = fullRosters.playerid and oneNdone_bat.team = fullRosters.team
+),
+
 batterStats as (
 	select batterid,  cast(right(left(gameid,7),4) as int) as yr, 
 		case when abflag = 'T' then 1 else 0 end as ab,
@@ -30,10 +77,9 @@ batterStats as (
 		else case when battingteam = 0 then visitingteam else left(gameid,3) end
 		end as team,
 		eventtype,eventcode,abflag, hitvalue, batterdest, shflag, sfflag,pinchhitflag,gameid
-	FROM playlogs.plays
-	-- where cast(right(left(gameid,7),4) as int) = 2021
-	
-	
+	FROM playlogs.plays, addYr
+	where batterid||case when battingteam = 0 then visitingteam else left(gameid,3) end in (addYr.pKey) 
+		and cast(right(left(gameid,7),4) as int) > 1900
 ),
 
 leagueTotals as (
@@ -63,7 +109,7 @@ wRAA_calc as (
 	from batterStats
 	left join constants.woba_fip as woba on batterStats.yr = woba.season
 	group by batterid, yr, team, wbb, whbp, w1b, w2b, w3b, whr, woba, wobascale
-	having (sum(ab) + sum(bb) + sum(hbp) + sum(sh) + sum(sf))>0
+	having (sum(ab) + sum(bb) + sum(hbp) + sum(sh) + sum(sf)) >0
 ),
 
 wGDPcalc as (
@@ -246,31 +292,44 @@ rlrCalc as (
 	left join (select yr, sum(pa) as lgPa
 				from batterStats
 				group by yr) as leaguePA on batterStats.yr = leaguePA.yr
-	where batterStats.yr>1900
+	where batterStats.yr>1900 --rpw is not null
 	group by batterid, batterStats.yr, team, lgPa, rpw, lgG
+), 
+
+war as (
+	select wRAA_calc.batterid, lastname, firstname, wRAA_calc.yr, wRAA_calc.team,
+			(wRAA+bsr+rpos+rlr)/rpw as war
+	from wRAA_calc
+	left join addYr on wRAA_calc.yr = addYr.yr and wRAA_calc.batterid = addYr.playerid
+	left join bsrCalc on wRAA_calc.batterid = bsrCalc.batterid
+						and wRAA_calc.yr = bsrCalc.yr
+						and wRAA_calc.team = bsrCalc.team
+	left join rposCalc on wRAA_calc.batterid = rposCalc.batterid
+						and wRAA_calc.yr = rposCalc.year
+						and wRAA_calc.team = rposCalc.team
+	left join rlrCalc on wRAA_calc.batterid = rlrCalc.batterid
+						and wRAA_calc.yr = rlrCalc.yr
+						and wRAA_calc.team = rlrCalc.team
+	left join lgRPW_calc on wRAA_calc.yr = lgRPW_calc.yr
+	where wRAA_calc.yr > 1900
+),
+
+rankResults as (
+	select batterid, lastname, firstname, team, yr,
+		war,
+		rank() over (partition by team order by war desc ) as WAR_Rank
+	from war
 )
 
+Select batterid, lastname, firstname, team, yr, 
+	war, WAR_Rank
+from rankResults
+where WAR_Rank = 1
 
--- select distinct wRAA_calc.batterid, wRAA_calc.yr, wRAA_calc.team,wRAA,bsr,rpos,rlr,rpw,
--- 		(wRAA+bsr+rpos+rlr)/rpw as war
--- from wRAA_calc
--- left join bsrCalc on wRAA_calc.batterid = bsrCalc.batterid
--- 					and wRAA_calc.yr = bsrCalc.yr
--- 					and wRAA_calc.team = bsrCalc.team
--- left join rposCalc on wRAA_calc.batterid = rposCalc.batterid
--- 					and wRAA_calc.yr = rposCalc.year
--- 					and wRAA_calc.team = rposCalc.team
--- left join rlrCalc on wRAA_calc.batterid = rlrCalc.batterid
--- 					and wRAA_calc.yr = rlrCalc.yr
--- 					and wRAA_calc.team = rlrCalc.team
--- left join lgRPW_calc on wRAA_calc.yr = lgRPW_calc.yr
--- where wRAA_calc.yr > 1900
--- 	and  wRAA_calc.batterid = 'silvd001'
-
-
-select * from wsbCalc -- wGDPcalc --,wsbCalc
-where batterid = 'silvd001'
-
+-- select * from wRAA_calc 
+-- -- where rpw =0
+-- order by yr
+-- -- limit 100
 
 
 
